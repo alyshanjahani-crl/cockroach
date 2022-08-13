@@ -37,6 +37,7 @@ type Metrics struct {
 	TotalPGWireEgressBytes      *aggmetric.AggGauge
 	TotalExternalIOEgressBytes  *aggmetric.AggGauge
 	TotalExternalIOIngressBytes *aggmetric.AggGauge
+	TotalExternalIOEgressRequests *aggmetric.AggGauge
 
 	mu struct {
 		syncutil.Mutex
@@ -125,6 +126,12 @@ var (
 		Measurement: "Bytes",
 		Unit:        metric.Unit_COUNT,
 	}
+	metaTotalExternalIOEgressRequests = metric.Metadata{
+		Name:        "tenant.consumption.external_io_egress_requests",
+		Help:        "Total number of requests to external services such as cloud storage providers",
+		Measurement: "Requests",
+		Unit:        metric.Unit_COUNT,
+	}
 )
 
 func (m *Metrics) init() {
@@ -142,6 +149,7 @@ func (m *Metrics) init() {
 		TotalPGWireEgressBytes:      b.Gauge(metaTotalPGWireEgressBytes),
 		TotalExternalIOEgressBytes:  b.Gauge(metaTotalExternalIOEgressBytes),
 		TotalExternalIOIngressBytes: b.Gauge(metaTotalExternalIOIngressBytes),
+		TotalExternalIOEgressRequests: b.Gauge(metaTotalExternalIOEgressRequests),
 	}
 	m.mu.tenantMetrics = make(map[roachpb.TenantID]tenantMetrics)
 }
@@ -159,7 +167,8 @@ type tenantMetrics struct {
 	totalSQLPodsCPUSeconds      *aggmetric.GaugeFloat64
 	totalPGWireEgressBytes      *aggmetric.Gauge
 	totalExternalIOEgressBytes  *aggmetric.Gauge
-	totalExternalIOIngressBytes *aggmetric.Gauge
+	totalExternalIOIngressBytes   *aggmetric.Gauge
+	totalExternalIOEgressRequests *aggmetric.Gauge
 
 	// Mutex is used to atomically update metrics together with a corresponding
 	// change to the system table.
@@ -176,17 +185,18 @@ func (m *Metrics) getTenantMetrics(tenantID roachpb.TenantID) tenantMetrics {
 		tm = tenantMetrics{
 			totalRU:                     m.TotalRU.AddChild(tid),
 			totalKVRU:                   m.TotalKVRU.AddChild(tid),
-			totalReadBatches:            m.TotalReadBatches.AddChild(tid),
-			totalReadRequests:           m.TotalReadRequests.AddChild(tid),
-			totalReadBytes:              m.TotalReadBytes.AddChild(tid),
-			totalWriteBatches:           m.TotalWriteBatches.AddChild(tid),
-			totalWriteRequests:          m.TotalWriteRequests.AddChild(tid),
-			totalWriteBytes:             m.TotalWriteBytes.AddChild(tid),
-			totalSQLPodsCPUSeconds:      m.TotalSQLPodsCPUSeconds.AddChild(tid),
-			totalPGWireEgressBytes:      m.TotalPGWireEgressBytes.AddChild(tid),
-			totalExternalIOEgressBytes:  m.TotalExternalIOEgressBytes.AddChild(tid),
-			totalExternalIOIngressBytes: m.TotalExternalIOIngressBytes.AddChild(tid),
-			mutex:                       &syncutil.Mutex{},
+			totalReadBatches:              m.TotalReadBatches.AddChild(tid),
+			totalReadRequests:             m.TotalReadRequests.AddChild(tid),
+			totalReadBytes:                m.TotalReadBytes.AddChild(tid),
+			totalWriteBatches:             m.TotalWriteBatches.AddChild(tid),
+			totalWriteRequests:            m.TotalWriteRequests.AddChild(tid),
+			totalWriteBytes:               m.TotalWriteBytes.AddChild(tid),
+			totalSQLPodsCPUSeconds:        m.TotalSQLPodsCPUSeconds.AddChild(tid),
+			totalPGWireEgressBytes:        m.TotalPGWireEgressBytes.AddChild(tid),
+			totalExternalIOEgressBytes:    m.TotalExternalIOEgressBytes.AddChild(tid),
+			totalExternalIOIngressBytes:   m.TotalExternalIOIngressBytes.AddChild(tid),
+			totalExternalIOEgressRequests: m.TotalExternalIOEgressRequests.AddChild(tid),
+			mutex:                         &syncutil.Mutex{},
 		}
 		m.mu.tenantMetrics[tenantID] = tm
 	}

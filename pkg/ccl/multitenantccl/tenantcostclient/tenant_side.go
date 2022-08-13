@@ -845,6 +845,7 @@ func (c *tenantSideCostController) onExternalIO(
 	c.mu.Lock()
 	c.mu.consumption.ExternalIOIngressBytes += uint64(usage.IngressBytes)
 	c.mu.consumption.ExternalIOEgressBytes += uint64(usage.EgressBytes)
+	c.mu.consumption.ExternalIOEgressRequests += 1
 	if c.shouldAccountForExternalIORUs() {
 		c.mu.consumption.RU += float64(totalRU)
 	}

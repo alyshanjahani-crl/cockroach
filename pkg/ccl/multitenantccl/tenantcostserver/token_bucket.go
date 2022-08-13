@@ -134,6 +134,7 @@ func (s *instance) TokenBucketRequest(
 	metrics.totalPGWireEgressBytes.Update(int64(consumption.PGWireEgressBytes))
 	metrics.totalExternalIOEgressBytes.Update(int64(consumption.ExternalIOEgressBytes))
 	metrics.totalExternalIOIngressBytes.Update(int64(consumption.ExternalIOIngressBytes))
+	metrics.totalExternalIOEgressRequests.Update(int64(consumption.ExternalIOEgressRequests))
 	return result
 }
 
