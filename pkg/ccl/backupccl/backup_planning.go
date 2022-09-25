@@ -58,6 +58,7 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/util/tracing"
 	"github.com/cockroachdb/cockroach/pkg/util/uuid"
 	"github.com/cockroachdb/errors"
+	"github.com/cockroachdb/redact"
 	pbtypes "github.com/gogo/protobuf/types"
 )
 
@@ -618,6 +619,7 @@ func requireEnterprise(execCfg *sql.ExecutorConfig, feature string) error {
 func backupPlanHook(
 	ctx context.Context, stmt tree.Statement, p sql.PlanHookState,
 ) (sql.PlanHookRowFn, colinfo.ResultColumns, []sql.PlanNode, bool, error) {
+	log.Infof(ctx, "backupPlanHook")
 	backupStmt := getBackupStatement(stmt)
 	if backupStmt == nil {
 		return nil, nil, nil, false, nil
@@ -699,6 +701,8 @@ func backupPlanHook(
 		encryptionParams.Mode = jobspb.EncryptionMode_KMS
 	}
 
+	log.Infof(ctx, "fn defined")
+
 	fn := func(ctx context.Context, _ []sql.PlanNode, resultsCh chan<- tree.Datums) error {
 		// TODO(dan): Move this span into sql.
 		ctx, span := tracing.ChildSpan(ctx, stmt.StatementTag())
@@ -767,6 +771,9 @@ func backupPlanHook(
 				return err
 			}
 			if err := requireEnterprise(p.ExecCfg(), "encryption"); err != nil {
+				return err
+			}
+			if err = logAndSanitizeKmsURIs(ctx, encryptionParams.RawKmsUris...); err != nil {
 				return err
 			}
 		}
@@ -864,6 +871,12 @@ func backupPlanHook(
 
 		jobID := p.ExecCfg().JobRegistry.MakeJobID()
 
+		log.Infof(ctx, "hello")
+
+		if err := logAndSanitizeBackupDestinations(ctx, append(to, incrementalFrom...)...); err != nil {
+			return errors.Wrap(err, "logging backup destinations")
+		}
+
 		if p.ExecCfg().Settings.Version.IsActive(ctx, clusterversion.BackupResolutionInJob) {
 			description, err := backupJobDescription(p,
 				backupStmt.Backup, to, incrementalFrom,
@@ -928,6 +941,10 @@ func backupPlanHook(
 				return err
 			}
 			return sj.ReportExecutionResults(ctx, resultsCh)
+		}
+
+		if err := logAndSanitizeBackupDestinations(ctx, append(to, incrementalFrom...)...); err != nil {
+			return errors.Wrap(err, "logging backup destinations")
 		}
 
 		// TODO(dt): delete this in 22.2.
@@ -1109,6 +1126,29 @@ func backupPlanHook(
 		return fn, jobs.DetachedJobExecutionResultHeader, nil, false, nil
 	}
 	return fn, jobs.BulkJobExecutionResultHeader, nil, false, nil
+}
+
+func logAndSanitizeKmsURIs(ctx context.Context, kmsURIs ...string) error {
+	for _, dest := range kmsURIs {
+		clean, err := cloud.RedactKMSURI(dest)
+		if err != nil {
+			return err
+		}
+		log.Ops.Infof(ctx, "backup planning to connect to KMS destination %v", redact.Safe(clean))
+	}
+	return nil
+}
+
+func logAndSanitizeBackupDestinations(ctx context.Context, backupDestinations ...string) error {
+	log.Infof(ctx, "log destinations")
+	for _, dest := range backupDestinations {
+		clean, err := cloud.SanitizeExternalStorageURI(dest, nil)
+		if err != nil {
+			return err
+		}
+		log.Ops.Infof(ctx, "backup planning to connect to destination %v", redact.Safe(clean))
+	}
+	return nil
 }
 
 func collectTelemetry(
