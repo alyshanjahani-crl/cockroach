@@ -395,6 +395,9 @@ func (handler *proxyHandler) handle(ctx context.Context, incomingConn net.Conn) 
 		return err
 	}
 
+	numConns := handler.balancer.GetTracker().CountConnectionsForTenant(tenID)
+	log.Infof(ctx, "CONN TRACKER CONNS %v", numConns)
+
 	connector := &connector{
 		ClusterName:       clusterName,
 		TenantID:          tenID,

@@ -77,6 +77,13 @@ func (t *ConnTracker) GetConnsMap(tenantID roachpb.TenantID) map[string][]Connec
 	return e.getConnsMap()
 }
 
+// CountConnectionsForTenant returns the number of connections open for the specified
+// tenant.
+func (t *ConnTracker) CountConnectionsForTenant(tenantID roachpb.TenantID) int {
+	active, idle := t.listAssignments(tenantID)
+	return len(active) + len(idle)
+}
+
 // registerAssignment registers the server assignment for tracking under the
 // given tenant. If the assignment has already been registered, this is a no-op.
 func (t *ConnTracker) registerAssignment(tenantID roachpb.TenantID, sa *ServerAssignment) {
