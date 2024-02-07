@@ -63,6 +63,9 @@ type bufferedSink struct {
 		// timer is set when a flushAsync() call is scheduled to happen in the
 		// future.
 		timer *time.Timer
+		// hasFlushedSuccessfully indicates whether the buffered sink has ever
+		// successfully flushed yet.
+		hasFlushedSuccessfully bool
 	}
 }
 
@@ -303,7 +306,7 @@ func (bs *bufferedSink) runFlusher(stopC <-chan struct{}) {
 		if errC != nil {
 			errC <- err
 		} else if err != nil {
-			Ops.Errorf(context.Background(), "logging error from %T: %v", bs.child, err)
+			bs.maybeLogFlushError(err)
 			if bs.crashOnAsyncFlushFailure {
 				logging.mu.Lock()
 				f := logging.mu.exitOverride.f
@@ -315,10 +318,26 @@ func (bs *bufferedSink) runFlusher(stopC <-chan struct{}) {
 					exit.WithCode(code)
 				}
 			}
+		} else {
+			// We have successfully flushed output to the child sink.
+			bs.mu.Lock()
+			bs.mu.hasFlushedSuccessfully = true
+			bs.mu.Unlock()
 		}
 		if done {
 			return
 		}
+	}
+}
+
+// maybeLogFlushError will log err to the OPS channel with the ERROR severity
+// ONLY if the bufferedSink has flushed successfully before. This is to prevent
+// creating a cycle of noise when a sink is intentionally unavailable.
+func (bs *bufferedSink) maybeLogFlushError(err error){
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+	if bs.mu.hasFlushedSuccessfully {
+		Ops.Errorf(context.Background(), "logging error from %T: %v", bs.child, err)
 	}
 }
 
