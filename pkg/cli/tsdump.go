@@ -13,6 +13,7 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
+	"github.com/gogo/protobuf/proto"
 	"io"
 	"net"
 	"net/http"
@@ -49,6 +50,7 @@ var debugTimeSeriesDumpOpts = struct {
 	zendeskTicket    string
 	organizationName string
 	userName         string
+	lowPriority      bool
 }{
 	format:       tsDumpText,
 	from:         timestampValue{},
@@ -154,6 +156,7 @@ will then convert it to the --format requested in the current invocation.
 				Resolutions: []tspb.TimeSeriesResolution{
 					tspb.TimeSeriesResolution_RESOLUTION_30M, tspb.TimeSeriesResolution_RESOLUTION_10S,
 				},
+				LowPriority: proto.Bool(debugTimeSeriesDumpOpts.lowPriority),
 			}
 			tsClient := tspb.NewTimeSeriesClient(conn)
 

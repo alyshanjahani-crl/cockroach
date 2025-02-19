@@ -165,6 +165,9 @@ message DumpRequest {
   // Resolutions of data to be dumped. When not provided, defaults to only
   // RESOLUTION_10S.
   repeated TimeSeriesResolution resolutions = 4;
+  // A flag that indicates whether the dump request should be performed at
+  // a low priority with respect to admission control.
+  optional bool low_priority = 5;
 }
 
 // TimeSeries is the gRPC API for the time series server. Through grpc-gateway,

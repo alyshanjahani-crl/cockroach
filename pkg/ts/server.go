@@ -7,6 +7,7 @@ package ts
 
 import (
 	"context"
+	"github.com/cockroachdb/cockroach/pkg/util/admission/admissionpb"
 	"math"
 
 	"github.com/cockroachdb/cockroach/pkg/kv"
@@ -401,6 +402,11 @@ func dumpImpl(
 	if len(resolutions) == 0 {
 		resolutions = []tspb.TimeSeriesResolution{tspb.TimeSeriesResolution_RESOLUTION_10S}
 	}
+	useLowPriority := false
+	if req.LowPriority != nil {
+		useLowPriority = *req.LowPriority
+	}
+
 	for _, seriesName := range req.Names {
 		for _, res := range resolutions {
 			if err := dumpTimeseriesAllSources(
@@ -410,6 +416,7 @@ func dumpImpl(
 				ResolutionFromProto(res),
 				req.StartNanos,
 				req.EndNanos,
+				useLowPriority,
 				d,
 			); err != nil {
 				return err
@@ -465,6 +472,7 @@ func dumpTimeseriesAllSources(
 	seriesName string,
 	diskResolution Resolution,
 	startNanos, endNanos int64,
+	lowPriority bool,
 	dump func(*roachpb.KeyValue) error,
 ) error {
 	if endNanos == 0 {
@@ -488,6 +496,12 @@ func dumpTimeseriesAllSources(
 
 	for span != nil {
 		b := &kv.Batch{}
+		if lowPriority {
+			// The default source AdmissionHeader_OTHER bypasses admission control.
+			b.AdmissionHeader.Source = kvpb.AdmissionHeader_FROM_SQL
+			// Use a low priority.
+			b.AdmissionHeader.Priority = int32(admissionpb.UserLowPri)
+		}
 		scan := kvpb.NewScan(span.Key, span.EndKey)
 		b.AddRawRequest(scan)
 		b.Header.MaxSpanRequestKeys = dumpBatchSize
