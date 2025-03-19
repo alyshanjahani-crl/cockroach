@@ -1159,6 +1159,15 @@ func (s *Server) newConnExecutor(
 
 	ex.state.txnAbortCount = ex.metrics.EngineMetrics.TxnAbortCount
 
+	// When sql_metrics_internal_query is toggled change the service metrics
+	// used by the executor accordingly.
+	ex.dataMutatorIterator.setSqlMetricsInternalQuery = func(enabled bool) {
+		if enabled {
+			ex.metrics = &ex.server.InternalMetrics
+		} else {
+			ex.metrics = &ex.server.Metrics
+		}
+	}
 	// The transaction_read_only variable is special; its updates need to be
 	// hooked-up to the executor.
 	ex.dataMutatorIterator.setCurTxnReadOnly = func(readOnly bool) error {

@@ -143,6 +143,12 @@ message SessionData {
   // for deadlock detection.
   google.protobuf.Duration deadlock_timeout = 33 [(gogoproto.nullable) = false,
     (gogoproto.stdduration) = true];
+
+	// Test: session variable that can be used to treat external connections as
+	// an internal execution, specifically so that their execution is tracked via
+	// the sql.*.internal metrics. However, unlike queries that actually use the internal
+	// executor, these queries will still collect statement/transaction level statistics.
+  bool sql_metrics_internal_query = 34;
 }
 
 // DataConversionConfig contains the parameters that influence the output

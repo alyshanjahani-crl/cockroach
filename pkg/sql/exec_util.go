@@ -3231,6 +3231,10 @@ type sessionDataMutatorCallbacks struct {
 	// needed because the stats writer needs to be notified of changes to the
 	// application name.
 	onApplicationNameChange func(string)
+	// setSqlMetricsInternalQuery is called when the sql_metrics_internal_query flag changes.
+	// It is needed because the connExecutor needs to use the correct set of metrics (ex/
+	// sql.service.latency.internal vs sql.service.latency).
+	setSqlMetricsInternalQuery func(bool)
 }
 
 // sessionDataMutatorIterator generates sessionDataMutators which allow
@@ -4095,6 +4099,13 @@ func (m *sessionDataMutator) SetOptimizerCheckInputMinRowCount(val float64) {
 
 func (m *sessionDataMutator) SetOptimizerPlanLookupJoinsWithReverseScans(val bool) {
 	m.data.OptimizerPlanLookupJoinsWithReverseScans = val
+}
+
+func (m *sessionDataMutator) SetSqlMetricsInternalQuery(val bool) {
+	m.data.SqlMetricsInternalQuery = val
+	if m.setSqlMetricsInternalQuery != nil {
+		m.setSqlMetricsInternalQuery(val)
+	}
 }
 
 // Utility functions related to scrubbing sensitive information on SQL Stats.

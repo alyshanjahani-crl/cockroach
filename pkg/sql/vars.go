@@ -3840,6 +3840,23 @@ var varGen = map[string]sessionVar{
 		},
 		GlobalDefault: globalTrue,
 	},
+
+	// CockroachDB extension.
+	`sql_metrics_internal_query`: {
+		GetStringVal: makePostgresBoolGetStringValFn(`sql_metrics_internal_query`),
+		Set: func(_ context.Context, m sessionDataMutator, s string) error {
+			b, err := paramparse.ParseBoolVar("sql_metrics_internal_query", s)
+			if err != nil {
+				return err
+			}
+			m.SetSqlMetricsInternalQuery(b)
+			return nil
+		},
+		Get: func(evalCtx *extendedEvalContext, _ *kv.Txn) (string, error) {
+			return formatBoolAsPostgresSetting(evalCtx.SessionData().SqlMetricsInternalQuery), nil
+		},
+		GlobalDefault: globalFalse,
+	},
 }
 
 func ReplicationModeFromString(s string) (sessiondatapb.ReplicationMode, error) {
