@@ -113,6 +113,15 @@ func (r *RoachtestHTTPClient) GetJSON(
 	return httputil.GetJSONWithOptions(*r.client.Client, path, response, opts...)
 }
 
+func (r *RoachtestHTTPClient) Post(
+	ctx context.Context, url string, contentType string, body io.Reader,
+) (*http.Response, error) {
+	if err := r.addCookies(ctx, url); err != nil {
+		return nil, err
+	}
+	return r.client.Post(ctx, url, contentType, body)
+}
+
 func (r *RoachtestHTTPClient) PostProtobuf(
 	ctx context.Context, path string, request, response protoutil.Message,
 ) error {
