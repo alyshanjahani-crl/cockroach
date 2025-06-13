@@ -175,11 +175,13 @@ func (q *resolverQueueImpl) resolveLocked(ctx context.Context) error {
 		blockingTxnIDsResp, err := q.resolverEndpoint(ctx, blockingTxnIDsReq)
 		if err != nil {
 			allErrors = errors.CombineErrors(allErrors, err)
+			q.metrics.ResolverEndpointError.Inc(1)
 		}
 
 		waitingTxnIDsResp, err := q.resolverEndpoint(ctx, waitingTxnIDsReq)
 		if err != nil {
 			allErrors = errors.CombineErrors(allErrors, err)
+			q.metrics.ResolverEndpointError.Inc(1)
 		}
 
 		resolvedBlockingTxnIDs, inProgressBlockingTxnIDs := extractResolvedAndInProgressTxnIDs(blockingTxnIDsResp)

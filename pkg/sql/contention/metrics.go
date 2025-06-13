@@ -10,9 +10,10 @@ import "github.com/cockroachdb/cockroach/pkg/util/metric"
 // Metrics is a struct that include all metrics related to contention event
 // store.
 type Metrics struct {
-	ResolverQueueSize *metric.Gauge
-	ResolverRetries   *metric.Counter
-	ResolverFailed    *metric.Counter
+	ResolverQueueSize     *metric.Gauge
+	ResolverRetries       *metric.Counter
+	ResolverFailed        *metric.Counter
+	ResolverEndpointError *metric.Counter
 }
 
 var _ metric.Struct = Metrics{}
@@ -39,6 +40,12 @@ func NewMetrics() Metrics {
 			Name:        "sql.contention.resolver.failed_resolutions",
 			Help:        "Number of failed transaction ID resolution attempts",
 			Measurement: "Failed transaction ID resolution count",
+			Unit:        metric.Unit_COUNT,
+		}),
+		ResolverEndpointError: metric.NewCounter(metric.Metadata{
+			Name:        "sql.contention.resolver.endpoint_failed",
+			Help:        "Number of failed requests to the resolver endpoint",
+			Measurement: "txn id resolution endpoint failures",
 			Unit:        metric.Unit_COUNT,
 		}),
 	}
