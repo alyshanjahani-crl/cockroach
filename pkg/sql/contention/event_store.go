@@ -96,6 +96,8 @@ type eventStore struct {
 
 	resolver resolverQueue
 
+	metrics *Metrics
+
 	mu struct {
 		syncutil.RWMutex
 
@@ -126,6 +128,7 @@ func newEventStore(
 		eventBatchChan: make(chan *eventBatch, eventChannelSize),
 		closeCh:        make(chan struct{}),
 		timeSrc:        timeSrc,
+		metrics:        metrics,
 	}
 
 	s.mu.store = cache.NewUnorderedCache(cache.Config{
@@ -231,6 +234,9 @@ func (s *eventStore) startResolver(ctx context.Context, stopper *stop.Stopper) {
 
 // addEvent implements the eventWriter interface.
 func (s *eventStore) addEvent(e contentionpb.ExtendedContentionEvent) {
+
+	s.metrics.StoreAddEvent.Inc(1)
+
 	// Setting the TxnIDResolutionInterval to 0 effectively disables the
 	// eventStore.
 	if TxnIDResolutionInterval.Get(&s.st.SV) == 0 {
@@ -244,6 +250,8 @@ func (s *eventStore) addEvent(e contentionpb.ExtendedContentionEvent) {
 		threshold > 0 && e.BlockingEvent.Duration < threshold {
 		return
 	}
+
+	s.metrics.StoreRecordEvent.Inc(1)
 
 	s.guard.AtomicWrite(func(writerIdx int64) {
 		e.CollectionTs = s.timeSrc()

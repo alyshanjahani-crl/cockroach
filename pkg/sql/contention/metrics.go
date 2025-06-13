@@ -13,6 +13,8 @@ type Metrics struct {
 	ResolverQueueSize *metric.Gauge
 	ResolverRetries   *metric.Counter
 	ResolverFailed    *metric.Counter
+	StoreAddEvent     *metric.Counter
+	StoreRecordEvent  *metric.Counter
 }
 
 var _ metric.Struct = Metrics{}
@@ -39,6 +41,18 @@ func NewMetrics() Metrics {
 			Name:        "sql.contention.resolver.failed_resolutions",
 			Help:        "Number of failed transaction ID resolution attempts",
 			Measurement: "Failed transaction ID resolution count",
+			Unit:        metric.Unit_COUNT,
+		}),
+		StoreAddEvent: metric.NewCounter(metric.Metadata{
+			Name:        "sql.contention.event_store.add_event",
+			Help:        "number of contention events passed to the store",
+			Measurement: "add event",
+			Unit:        metric.Unit_COUNT,
+		}),
+		StoreRecordEvent: metric.NewCounter(metric.Metadata{
+			Name:        "sql.contention.event_store.record_event",
+			Help:        "number of contention events written to the store",
+			Measurement: "record event",
 			Unit:        metric.Unit_COUNT,
 		}),
 	}

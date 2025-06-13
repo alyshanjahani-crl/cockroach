@@ -140,6 +140,7 @@ func (t *Cache) Start(ctx context.Context, stopper *stop.Stopper) {
 			select {
 			case b := <-t.blockCh:
 				t.store.add(b)
+				t.metrics.CacheIngestCounter.Inc(1)
 			case <-stopper.ShouldQuiesce():
 				close(t.closeCh)
 				return
@@ -166,6 +167,7 @@ func (t *Cache) Lookup(txnID uuid.UUID) (result appstatspb.TransactionFingerprin
 
 // Record implements the Writer interface.
 func (t *Cache) Record(resolvedTxnID contentionpb.ResolvedTxnID) {
+	t.metrics.CacheRecordCounter.Inc(1)
 	t.writer.Record(resolvedTxnID)
 }
 

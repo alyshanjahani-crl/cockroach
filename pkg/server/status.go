@@ -411,7 +411,7 @@ func (b *baseStatusServer) localExecutionInsights(
 }
 
 func (b *baseStatusServer) localTxnIDResolution(
-	req *serverpb.TxnIDResolutionRequest,
+	ctx context.Context, req *serverpb.TxnIDResolutionRequest,
 ) *serverpb.TxnIDResolutionResponse {
 	txnIDCache := b.sqlServer.pgServer.SQLServer.GetTxnIDCache()
 
@@ -420,23 +420,31 @@ func (b *baseStatusServer) localTxnIDResolution(
 		unresolvedTxnIDs[txnID] = struct{}{}
 	}
 
+	log.Ops.Infof(ctx, "local txn id resolution requested for %d ids", len(req.TxnIDs))
+
 	resp := &serverpb.TxnIDResolutionResponse{
 		ResolvedTxnIDs: make([]contentionpb.ResolvedTxnID, 0, len(req.TxnIDs)),
 	}
 
+	notFound := 0
 	for i := range req.TxnIDs {
 		if txnFingerprintID, found := txnIDCache.Lookup(req.TxnIDs[i]); found {
 			resp.ResolvedTxnIDs = append(resp.ResolvedTxnIDs, contentionpb.ResolvedTxnID{
 				TxnID:            req.TxnIDs[i],
 				TxnFingerprintID: txnFingerprintID,
 			})
+		} else {
+			notFound += 1
 		}
 	}
+
+	log.Ops.Infof(ctx, "local txn id resolution %d unresolved txns", notFound)
 
 	// If we encounter any transaction ID that we cannot resolve, we tell the
 	// txnID cache to drain its write buffer (note: The .DrainWriteBuffer() call
 	// is asynchronous). The client of this RPC will perform retries.
 	if len(unresolvedTxnIDs) > 0 {
+		log.Ops.Info(ctx, "draining txn id cache write buffer")
 		txnIDCache.DrainWriteBuffer()
 	}
 
@@ -4177,7 +4185,7 @@ func (s *statusServer) TxnIDResolution(
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	if local {
-		return s.localTxnIDResolution(req), nil
+		return s.localTxnIDResolution(ctx, req), nil
 	}
 
 	statusClient, err := s.dialNode(ctx, requestedNodeID)
