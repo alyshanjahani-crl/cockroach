@@ -424,7 +424,7 @@ func (s *kafkaSink) EmitResolvedTimestamp(
 		if err != nil {
 			return err
 		}
-		s.scratch, payload = s.scratch.Copy(payload)
+		s.scratch, payload = s.scratch.Copy(payload, 0 /* extraCap */)
 
 		// sarama caches this, which is why we have to periodically refresh the
 		// metadata above. Staleness here does not impact correctness. Some new

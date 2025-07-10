@@ -219,7 +219,8 @@ func (b *Builder) buildAlterTableSplit(
 	if err != nil {
 		return execPlan{}, colOrdMap{}, err
 	}
-	expiration, err := b.buildScalar(&emptyBuildScalarCtx, split.Expiration)
+	scalarCtx := buildScalarCtx{}
+	expiration, err := b.buildScalar(&scalarCtx, split.Expiration)
 	if err != nil {
 		return execPlan{}, colOrdMap{}, err
 	}
@@ -294,11 +295,12 @@ func (b *Builder) buildAlterRangeRelocate(
 	if err != nil {
 		return execPlan{}, colOrdMap{}, err
 	}
-	toStoreID, err := b.buildScalar(&emptyBuildScalarCtx, relocate.ToStoreID)
+	scalarCtx := buildScalarCtx{}
+	toStoreID, err := b.buildScalar(&scalarCtx, relocate.ToStoreID)
 	if err != nil {
 		return execPlan{}, colOrdMap{}, err
 	}
-	fromStoreID, err := b.buildScalar(&emptyBuildScalarCtx, relocate.FromStoreID)
+	fromStoreID, err := b.buildScalar(&scalarCtx, relocate.FromStoreID)
 	if err != nil {
 		return execPlan{}, colOrdMap{}, err
 	}
@@ -323,7 +325,8 @@ func (b *Builder) buildControlJobs(
 		return execPlan{}, colOrdMap{}, err
 	}
 
-	reason, err := b.buildScalar(&emptyBuildScalarCtx, ctl.Reason)
+	scalarCtx := buildScalarCtx{}
+	reason, err := b.buildScalar(&scalarCtx, ctl.Reason)
 	if err != nil {
 		return execPlan{}, colOrdMap{}, err
 	}
@@ -429,7 +432,8 @@ func (b *Builder) buildExport(
 		return execPlan{}, colOrdMap{}, err
 	}
 
-	fileName, err := b.buildScalar(&emptyBuildScalarCtx, export.FileName)
+	scalarCtx := buildScalarCtx{}
+	fileName, err := b.buildScalar(&scalarCtx, export.FileName)
 	if err != nil {
 		return execPlan{}, colOrdMap{}, err
 	}
@@ -438,7 +442,7 @@ func (b *Builder) buildExport(
 	for i, o := range export.Options {
 		opts[i].Key = o.Key
 		var err error
-		opts[i].Value, err = b.buildScalar(&emptyBuildScalarCtx, o.Value)
+		opts[i].Value, err = b.buildScalar(&scalarCtx, o.Value)
 		if err != nil {
 			return execPlan{}, colOrdMap{}, err
 		}

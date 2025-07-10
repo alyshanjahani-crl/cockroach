@@ -6,7 +6,6 @@
 package cli
 
 import (
-	"archive/zip"
 	"context"
 	"database/sql/driver"
 	"fmt"
@@ -52,8 +51,8 @@ type debugZipContext struct {
 	z              *zipper
 	clusterPrinter *zipReporter
 	timeout        time.Duration
-	admin          serverpb.RPCAdminClient
-	status         serverpb.RPCStatusClient
+	admin          serverpb.AdminClient
+	status         serverpb.StatusClient
 	prefix         string
 
 	firstNodeSQLConn clisqlclient.Conn
@@ -180,32 +179,6 @@ func (zc *debugZipContext) getRedactedNodeDetails(
 
 type nodeLivenesses = map[roachpb.NodeID]livenesspb.NodeLivenessStatus
 
-// validateZipFile checks the integrity of the generated zip file.
-func validateZipFile(zipFilePath string, zr *zipReporter) error {
-	// skip validation if the user has not requested it.
-	if !zipCtx.validateZipFile {
-		return nil
-	}
-	// Open the zip file.
-	r, err := zip.OpenReader(zipFilePath)
-
-	defer func(r *zip.ReadCloser) {
-		if r != nil {
-			err := r.Close()
-			if err != nil {
-				zr.info("failed to close zip file: %v", err)
-			}
-		}
-	}(r)
-
-	if err != nil {
-		zr.info("The generated file %s is corrupt. Please retry debug zip generation. error: %v", zipFilePath, err)
-		return err
-	}
-
-	return nil
-}
-
 func runDebugZip(cmd *cobra.Command, args []string) (retErr error) {
 	if err := zipCtx.files.validate(); err != nil {
 		return err
@@ -229,7 +202,7 @@ func runDebugZip(cmd *cobra.Command, args []string) (retErr error) {
 	var tenants []*serverpb.Tenant
 	if err := func() error {
 		s := zr.start("discovering virtual clusters")
-		conn, finish, err := newClientConn(ctx, serverCfg)
+		conn, finish, err := getClientGRPCConn(ctx, serverCfg)
 		if err != nil {
 			return s.fail(err)
 		}
@@ -237,14 +210,12 @@ func runDebugZip(cmd *cobra.Command, args []string) (retErr error) {
 
 		var resp *serverpb.ListTenantsResponse
 		if err := timeutil.RunWithTimeout(context.Background(), "list virtual clusters", timeout, func(ctx context.Context) error {
-			adminClient := conn.NewAdminClient()
-			resp, err = adminClient.ListTenants(ctx, &serverpb.ListTenantsRequest{})
+			resp, err = serverpb.NewAdminClient(conn).ListTenants(ctx, &serverpb.ListTenantsRequest{})
 			return err
 		}); err != nil {
 			// For pre-v23.1 clusters, this endpoint in not implemented, proceed with
 			// only querying the system tenant.
-			statusClient := conn.NewStatusClient()
-			resp, sErr := statusClient.Details(ctx, &serverpb.DetailsRequest{NodeId: "local"})
+			resp, sErr := serverpb.NewStatusClient(conn).Details(ctx, &serverpb.DetailsRequest{NodeId: "local"})
 			if sErr != nil {
 				return s.fail(errors.CombineErrors(err, sErr))
 			}
@@ -274,9 +245,6 @@ func runDebugZip(cmd *cobra.Command, args []string) (retErr error) {
 	z := newZipper(out)
 	defer func() {
 		cErr := z.close()
-		if err = validateZipFile(dirName, zr); err != nil {
-			retErr = errors.CombineErrors(retErr, err)
-		}
 		retErr = errors.CombineErrors(retErr, cErr)
 	}()
 	s.done()
@@ -288,11 +256,14 @@ func runDebugZip(cmd *cobra.Command, args []string) (retErr error) {
 			sqlAddr := tenant.SqlAddr
 
 			s := zr.start(redact.Sprintf("establishing RPC connection to %s", cfg.AdvertiseAddr))
-			conn, finish, err := newClientConn(ctx, cfg)
+			conn, finish, err := getClientGRPCConn(ctx, cfg)
 			if err != nil {
 				return s.fail(err)
 			}
 			defer finish()
+
+			status := serverpb.NewStatusClient(conn)
+			admin := serverpb.NewAdminClient(conn)
 			s.done()
 
 			if sqlAddr == "" {
@@ -344,8 +315,8 @@ func runDebugZip(cmd *cobra.Command, args []string) (retErr error) {
 				clusterPrinter:   zr,
 				z:                z,
 				timeout:          timeout,
-				admin:            conn.NewAdminClient(),
-				status:           conn.NewStatusClient(),
+				admin:            admin,
+				status:           status,
 				firstNodeSQLConn: sqlConn,
 				sem:              semaphore.New(zipCtx.concurrency),
 				prefix:           debugBase + prefix,

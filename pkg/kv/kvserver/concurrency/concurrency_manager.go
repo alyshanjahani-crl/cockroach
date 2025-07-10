@@ -24,7 +24,6 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/settings/cluster"
 	"github.com/cockroachdb/cockroach/pkg/storage"
 	"github.com/cockroachdb/cockroach/pkg/storage/enginepb"
-	"github.com/cockroachdb/cockroach/pkg/util/buildutil"
 	"github.com/cockroachdb/cockroach/pkg/util/debugutil"
 	"github.com/cockroachdb/cockroach/pkg/util/hlc"
 	"github.com/cockroachdb/cockroach/pkg/util/log"
@@ -132,28 +131,16 @@ var UnreplicatedLockReliabilityLeaseTransfer = settings.RegisterBoolSetting(
 	settings.SystemOnly,
 	"kv.lock_table.unreplicated_lock_reliability.lease_transfer.enabled",
 	"whether the replica should attempt to keep unreplicated locks during lease transfers",
-	metamorphic.ConstantWithTestBool("kv.lock_table.unreplicated_lock_reliability.lease_transfer.enabled", false),
-	settings.WithValidateBool(func(_ *settings.Values, enabled bool) error {
-		if enabled && !buildutil.CrdbTestBuild {
-			return errors.Newf("kv.lock_table.unreplicated_lock_reliability.lease_transfer.enabled is not supported in production builds")
-		}
-		return nil
-	}),
+	false,
 )
 
-// UnreplicatedLockReliabilityMerge controls whether the replica will attempt to
-// keep unreplicated locks during range merge operations.
+// UnreplicatedLockReliabilityMerge controls whether the replica will
+// attempt to keep unreplicated locks during range merge operations.
 var UnreplicatedLockReliabilityMerge = settings.RegisterBoolSetting(
 	settings.SystemOnly,
 	"kv.lock_table.unreplicated_lock_reliability.merge.enabled",
 	"whether the replica should attempt to keep unreplicated locks during range merges",
-	metamorphic.ConstantWithTestBool("kv.lock_table.unreplicated_lock_reliability.merge.enabled", false),
-	settings.WithValidateBool(func(_ *settings.Values, enabled bool) error {
-		if enabled && !buildutil.CrdbTestBuild {
-			return errors.Newf("kv.lock_table.unreplicated_lock_reliability.merge.enabled is not supported in production builds")
-		}
-		return nil
-	}),
+	false,
 )
 
 var MaxLockFlushSize = settings.RegisterByteSizeSetting(
@@ -605,15 +592,6 @@ func (m *managerImpl) OnLockAcquired(ctx context.Context, acq *roachpb.LockAcqui
 		// when an unreplicated lock is being acquired by a transaction at an older
 		// epoch.
 		log.Errorf(ctx, "%v", err)
-	}
-}
-
-// OnLockMissing implements the Lockmanager interface.
-func (m *managerImpl) OnLockMissing(ctx context.Context, acq *roachpb.LockAcquisition) {
-	if err := m.lt.MarkIneligibleForExport(acq); err != nil {
-		// We don't currently expect any errors other than assertion failures that represent
-		// programming errors from this method.
-		log.Fatalf(ctx, "%v", err)
 	}
 }
 

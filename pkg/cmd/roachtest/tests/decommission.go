@@ -117,10 +117,8 @@ func registerDecommission(r registry.Registry) {
 			Name:             "decommission/mixed-versions",
 			Owner:            registry.OwnerKV,
 			Cluster:          r.MakeClusterSpec(numNodes),
-			CompatibleClouds: registry.AllClouds.NoAWS().NoIBM(),
+			CompatibleClouds: registry.AllExceptAWS,
 			Suites:           registry.Suites(registry.MixedVersion, registry.Nightly),
-			Monitor:          true,
-			Randomized:       true,
 			Run: func(ctx context.Context, t test.Test, c cluster.Cluster) {
 				runDecommissionMixedVersions(ctx, t, c)
 			},
@@ -1144,7 +1142,7 @@ func runDecommissionSlow(ctx context.Context, t test.Test, c cluster.Cluster) {
 	// since the decommissions will stall.
 	decomCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	m := c.NewDeprecatedMonitor(decomCtx)
+	m := c.NewMonitor(decomCtx)
 	for nodeID := 2; nodeID <= numNodes; nodeID++ {
 		id := nodeID
 		m.Go(func(ctx context.Context) error {
@@ -1195,7 +1193,7 @@ var decommissionFooter = []string{
 
 // Header from the output of `cockroach node status`.
 var statusHeader = []string{
-	"id", "address", "sql_address", "build", "started_at", "updated_at", "locality", "attrs", "is_available", "is_live",
+	"id", "address", "sql_address", "build", "started_at", "updated_at", "locality", "is_available", "is_live",
 }
 
 // Header from the output of `cockroach node status --decommission`.

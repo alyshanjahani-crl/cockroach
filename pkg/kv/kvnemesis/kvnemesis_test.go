@@ -22,12 +22,10 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/kv/kvserver/concurrency"
 	"github.com/cockroachdb/cockroach/pkg/kv/kvserver/kvserverbase"
 	"github.com/cockroachdb/cockroach/pkg/kv/kvserver/kvserverpb"
-	"github.com/cockroachdb/cockroach/pkg/kv/kvtestutils"
 	"github.com/cockroachdb/cockroach/pkg/roachpb"
 	"github.com/cockroachdb/cockroach/pkg/settings/cluster"
 	"github.com/cockroachdb/cockroach/pkg/storage/enginepb"
 	"github.com/cockroachdb/cockroach/pkg/testutils/datapathutils"
-	"github.com/cockroachdb/cockroach/pkg/testutils/serverutils"
 	"github.com/cockroachdb/cockroach/pkg/testutils/skip"
 	"github.com/cockroachdb/cockroach/pkg/testutils/sqlutils"
 	"github.com/cockroachdb/cockroach/pkg/testutils/testcluster"
@@ -210,17 +208,16 @@ func randWithSeed(
 		Logf(string, ...interface{})
 		Helper()
 	}, seedOrZero int64,
-) (*rand.Rand, counter, int64) {
+) *rand.Rand {
 	t.Helper()
-	var rngSource rand.Source
+	var rng *rand.Rand
 	if seedOrZero > 0 {
-		rngSource = rand.NewSource(seedOrZero)
+		rng = rand.New(rand.NewSource(seedOrZero))
 	} else {
-		rngSource, seedOrZero = randutil.NewTestRandSource()
+		rng, seedOrZero = randutil.NewTestRand()
 	}
 	t.Logf("seed: %d", seedOrZero)
-	countingSource := newCountingSource(rngSource.(rand.Source64))
-	return rand.New(countingSource), countingSource, seedOrZero
+	return rng
 }
 
 type ti interface {
@@ -331,71 +328,30 @@ func TestKVNemesisSingleNode_ReproposalChaos(t *testing.T) {
 	})
 }
 
-// TestKVNemesisMultiNode_BufferedWritesNoLockDurabilityUpgrades runs KVNemesis
-// with write buffering enabled and no lock durability ugprades. We leave splits
-// to be metamorphic since those are all handled in-memory.
-func TestKVNemesisMultiNode_BufferedWritesNoLockDurabilityUpgrades(t *testing.T) {
+// TestKVNemesisMultiNode_BufferedWrites runs KVNemesis with write buffering
+// enabled.
+func TestKVNemesisMultiNode_BufferedWrites(t *testing.T) {
 	defer leaktest.AfterTest(t)()
 	defer log.Scope(t).Close(t)
 
 	testKVNemesisImpl(t, kvnemesisTestCfg{
-		numNodes:                     3,
-		numSteps:                     defaultNumSteps,
-		concurrency:                  5,
-		seedOverride:                 0,
-		invalidLeaseAppliedIndexProb: 0.2,
-		injectReproposalErrorProb:    0.2,
+		numNodes:     3,
+		numSteps:     defaultNumSteps,
+		concurrency:  5,
+		seedOverride: 0,
+		// TODO(#145458): Until #145458 is fixed reduce the
+		// rate of lost writes by avoiding lease transfers and
+		// merges and also turning off error injection.
+		invalidLeaseAppliedIndexProb: 0.0,
+		injectReproposalErrorProb:    0.0,
 		assertRaftApply:              true,
 		bufferedWriteProb:            0.70,
-		testSettings: func(ctx context.Context, st *cluster.Settings) {
-			concurrency.UnreplicatedLockReliabilityLeaseTransfer.Override(ctx, &st.SV, false)
-			concurrency.UnreplicatedLockReliabilityMerge.Override(ctx, &st.SV, false)
-			kvcoord.BufferedWritesEnabled.Override(ctx, &st.SV, true)
-		}})
-}
-
-// TestKVNemesisMultiNode_BufferedWritesLockDurabilityUpgrades tests buffered
-// writes with all lock durability features enabled.
-func TestKVNemesisMultiNode_BufferedWritesLockDurabilityUpgrades(t *testing.T) {
-	defer leaktest.AfterTest(t)()
-	defer log.Scope(t).Close(t)
-
-	testKVNemesisImpl(t, kvnemesisTestCfg{
-		numNodes:                     3,
-		numSteps:                     defaultNumSteps,
-		concurrency:                  5,
-		seedOverride:                 0,
-		invalidLeaseAppliedIndexProb: 0.2,
-		injectReproposalErrorProb:    0.2,
-		assertRaftApply:              true,
-		bufferedWriteProb:            0.70,
-		testSettings: func(ctx context.Context, st *cluster.Settings) {
-			kvcoord.BufferedWritesEnabled.Override(ctx, &st.SV, true)
-			concurrency.UnreplicatedLockReliabilityLeaseTransfer.Override(ctx, &st.SV, true)
-			concurrency.UnreplicatedLockReliabilityMerge.Override(ctx, &st.SV, true)
-			concurrency.UnreplicatedLockReliabilitySplit.Override(ctx, &st.SV, true)
+		testGeneratorConfig: func(g *GeneratorConfig) {
+			g.Ops.ChangeLease = ChangeLeaseConfig{}
+			g.Ops.Merge = MergeConfig{}
 		},
-	})
-}
-
-// TestKVNemesisMultiNode_BufferedWritesNoPipelining turns on buffered
-// writes and turns off write pipelining.
-func TestKVNemesisMultiNode_BufferedWritesNoPipelining(t *testing.T) {
-	defer leaktest.AfterTest(t)()
-	defer log.Scope(t).Close(t)
-
-	testKVNemesisImpl(t, kvnemesisTestCfg{
-		numNodes:                     3,
-		numSteps:                     defaultNumSteps,
-		concurrency:                  5,
-		seedOverride:                 0,
-		invalidLeaseAppliedIndexProb: 0.2,
-		injectReproposalErrorProb:    0.2,
-		assertRaftApply:              true,
-		bufferedWriteProb:            0.70,
 		testSettings: func(ctx context.Context, st *cluster.Settings) {
 			kvcoord.BufferedWritesEnabled.Override(ctx, &st.SV, true)
-			kvcoord.PipelinedWritesEnabled.Override(ctx, &st.SV, false)
 			concurrency.UnreplicatedLockReliabilityLeaseTransfer.Override(ctx, &st.SV, true)
 			concurrency.UnreplicatedLockReliabilityMerge.Override(ctx, &st.SV, true)
 			concurrency.UnreplicatedLockReliabilitySplit.Override(ctx, &st.SV, true)
@@ -446,7 +402,7 @@ func testKVNemesisImpl(t *testing.T, cfg kvnemesisTestCfg) {
 
 	// Can set a seed here for determinism. This works best when the seed was
 	// obtained with cfg.concurrency=1.
-	rng, countingSource, seed := randWithSeed(t, cfg.seedOverride)
+	rng := randWithSeed(t, cfg.seedOverride)
 
 	// 4 nodes so we have somewhere to move 3x replicated ranges to.
 	ctx := context.Background()
@@ -467,10 +423,6 @@ func testKVNemesisImpl(t *testing.T, cfg kvnemesisTestCfg) {
 	config.NumNodes = cfg.numNodes
 	config.NumReplicas = 3
 	config.BufferedWritesProb = cfg.bufferedWriteProb
-
-	config.SeedForLogging = seed
-	config.RandSourceCounterForLogging = countingSource
-
 	if config.NumReplicas > cfg.numNodes {
 		config.NumReplicas = cfg.numNodes
 	}
@@ -479,7 +431,6 @@ func testKVNemesisImpl(t *testing.T, cfg kvnemesisTestCfg) {
 	}
 
 	logger := newTBridge(t)
-	defer dumpRaftLogsOnFailure(t, logger.ll.dir, tc.Servers)
 	env := &Env{SQLDBs: sqlDBs, Tracker: tr, L: logger}
 	failures, err := RunNemesis(ctx, rng, env, config, cfg.concurrency, cfg.numSteps, dbs...)
 
@@ -511,20 +462,4 @@ func TestRunReproductionSteps(t *testing.T) {
 	_, _ = db0, ctx
 
 	// Paste a repro as printed by kvnemesis here.
-}
-
-func dumpRaftLogsOnFailure(t *testing.T, dir string, srvs []serverutils.TestServerInterface) {
-	if !t.Failed() {
-		return
-	}
-	d := kvtestutils.RaftLogDumper{Dir: dir}
-	for _, srv := range srvs {
-		require.NoError(t, srv.GetStores().(*kvserver.Stores).VisitStores(func(s *kvserver.Store) error {
-			s.VisitReplicas(func(replica *kvserver.Replica) (wantMore bool) {
-				d.Dump(t, s.LogEngine(), s.StoreID(), replica.RangeID)
-				return true // more
-			})
-			return nil
-		}))
-	}
 }

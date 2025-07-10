@@ -132,7 +132,7 @@ func (zc *debugZipContext) collectPerNodeData(
 // makePerNodeZipRequests defines the zipRequests (API requests) that are to be
 // performed once per node.
 func makePerNodeZipRequests(
-	zr *zipReporter, prefix, id string, status serverpb.RPCStatusClient,
+	zr *zipReporter, prefix, id string, status serverpb.StatusClient,
 ) []zipRequest {
 	var zipRequests []zipRequest
 

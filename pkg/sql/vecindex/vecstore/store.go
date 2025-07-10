@@ -14,14 +14,14 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/kv/kvpb"
 	"github.com/cockroachdb/cockroach/pkg/roachpb"
 	"github.com/cockroachdb/cockroach/pkg/sql/catalog"
+	"github.com/cockroachdb/cockroach/pkg/sql/catalog/descpb"
 	"github.com/cockroachdb/cockroach/pkg/sql/catalog/descs"
+	"github.com/cockroachdb/cockroach/pkg/sql/catalog/fetchpb"
 	"github.com/cockroachdb/cockroach/pkg/sql/rowenc"
 	"github.com/cockroachdb/cockroach/pkg/sql/sem/catid"
-	"github.com/cockroachdb/cockroach/pkg/sql/sem/eval"
 	"github.com/cockroachdb/cockroach/pkg/sql/vecindex/cspann"
 	"github.com/cockroachdb/cockroach/pkg/sql/vecindex/cspann/quantize"
 	"github.com/cockroachdb/cockroach/pkg/sql/vecindex/vecencoding"
-	"github.com/cockroachdb/cockroach/pkg/sql/vecindex/vecstore/vecstorepb"
 	"github.com/cockroachdb/cockroach/pkg/util/log"
 	"github.com/cockroachdb/cockroach/pkg/util/unique"
 	"github.com/cockroachdb/cockroach/pkg/util/vector"
@@ -36,10 +36,6 @@ type Store struct {
 	// readOnly is true if the store does not accept writes.
 	readOnly bool
 
-	codec   keys.SQLCodec
-	tableID catid.DescID
-	indexID catid.IndexID
-
 	// The root partition always uses the UnQuantizer while other partitions may
 	// use any quantizer.
 	rootQuantizer quantize.Quantizer
@@ -49,42 +45,63 @@ type Store struct {
 	// the size of a partition. This is used for testing.
 	minConsistency kvpb.ReadConsistencyType
 
-	prefix   roachpb.Key // KV prefix for the vector index.
-	emptyVec vector.T    // A zero-valued vector, used when root centroid does not exist.
-
-	// These are set by NewWithLeasedDesc and should only be used for testing.
-	TestingTableDesc catalog.TableDescriptor
+	prefix    roachpb.Key            // KV prefix for the vector index.
+	pkPrefix  roachpb.Key            // KV prefix for the primary key.
+	fetchSpec fetchpb.IndexFetchSpec // A pre-built fetch spec for this index.
+	colIdxMap catalog.TableColMap    // A column map for extracting full sized vectors from the PK.
+	emptyVec  vector.T               // A zero-valued vector, used when root centroid does not exist.
 }
 
 var _ cspann.Store = (*Store)(nil)
 
-// NewWithLeasedDesc creates a Store for an index on the provided table descriptor
-// using the provided index descriptor. This is used in unit tests where full
-// vector index creation capabilities aren't necessarily available. This creation
-// method doesn't support external row data.
-func NewWithLeasedDesc(
+// NewWithColumnID creates a Store for an index on the provided table descriptor
+// using the provided column ID as the vector column for the index. This is used
+// in unit tests where full vector index creation capabilities aren't
+// necessarily available.
+func NewWithColumnID(
 	ctx context.Context,
 	db descs.DB,
 	quantizer quantize.Quantizer,
-	codec keys.SQLCodec,
+	defaultCodec keys.SQLCodec,
 	tableDesc catalog.TableDescriptor,
 	indexID catid.IndexID,
+	vectorColumnID descpb.ColumnID,
 ) (ps *Store, err error) {
 	ps = &Store{
-		db:               db,
-		kv:               db.KV(),
-		codec:            codec,
-		tableID:          tableDesc.GetID(),
-		indexID:          indexID,
-		rootQuantizer:    quantize.NewUnQuantizer(quantizer.GetDims(), quantizer.GetDistanceMetric()),
-		quantizer:        quantizer,
-		minConsistency:   kvpb.INCONSISTENT,
-		emptyVec:         make(vector.T, quantizer.GetDims()),
-		TestingTableDesc: tableDesc,
+		db:             db,
+		kv:             db.KV(),
+		rootQuantizer:  quantize.NewUnQuantizer(quantizer.GetDims()),
+		quantizer:      quantizer,
+		minConsistency: kvpb.INCONSISTENT,
+		emptyVec:       make(vector.T, quantizer.GetDims()),
 	}
-	ps.prefix = rowenc.MakeIndexKeyPrefix(codec, tableDesc.GetID(), indexID)
 
-	return ps, nil
+	codec := defaultCodec
+	tableID := tableDesc.GetID()
+	pk := tableDesc.GetPrimaryIndex()
+	if ext := tableDesc.ExternalRowData(); ext != nil {
+		// The table is external, so use the external codec and table ID. Also set
+		// the index to read-only.
+		log.VInfof(ctx, 2,
+			"table %d is external, using read-only mode for vector index %d",
+			tableDesc.GetID(), indexID,
+		)
+		ps.readOnly = true
+		codec = keys.MakeSQLCodec(ext.TenantID)
+		tableID = ext.TableID
+	}
+	ps.prefix = rowenc.MakeIndexKeyPrefix(codec, tableID, indexID)
+	ps.pkPrefix = rowenc.MakeIndexKeyPrefix(codec, tableID, pk.GetID())
+
+	ps.colIdxMap.Set(vectorColumnID, 0)
+	err = rowenc.InitIndexFetchSpec(
+		&ps.fetchSpec,
+		codec,
+		tableDesc,
+		pk,
+		[]descpb.ColumnID{vectorColumnID},
+	)
+	return ps, err
 }
 
 // New creates a cspann.Store interface backed by the KV for a single vector
@@ -93,48 +110,34 @@ func New(
 	ctx context.Context,
 	db descs.DB,
 	quantizer quantize.Quantizer,
-	defaultCodec keys.SQLCodec,
+	codec keys.SQLCodec,
 	tableID catid.DescID,
 	indexID catid.IndexID,
 ) (ps *Store, err error) {
-	ps = &Store{
-		db:             db,
-		kv:             db.KV(),
-		codec:          defaultCodec,
-		tableID:        tableID,
-		indexID:        indexID,
-		rootQuantizer:  quantize.NewUnQuantizer(quantizer.GetDims(), quantizer.GetDistanceMetric()),
-		quantizer:      quantizer,
-		minConsistency: kvpb.INCONSISTENT,
-		emptyVec:       make(vector.T, quantizer.GetDims()),
-	}
-
+	var tableDesc catalog.TableDescriptor
 	err = db.DescsTxn(ctx, func(ctx context.Context, txn descs.Txn) error {
-		tableDesc, err := txn.Descriptors().ByIDWithLeased(txn.KV()).Get().Table(ctx, tableID)
-		if err != nil {
-			return err
-		}
-
-		if ext := tableDesc.ExternalRowData(); ext != nil {
-			// The table is external, so use the external codec and table ID. Also set
-			// the index to read-only.
-			log.VInfof(ctx, 2,
-				"table %d is external, using read-only mode for vector index %d",
-				tableDesc.GetID(), indexID,
-			)
-			ps.readOnly = true
-			ps.codec = keys.MakeSQLCodec(ext.TenantID)
-			ps.tableID = ext.TableID
-		}
-
-		return nil
+		var err error
+		tableDesc, err = txn.Descriptors().ByIDWithLeased(txn.KV()).Get().Table(ctx, tableID)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	ps.prefix = rowenc.MakeIndexKeyPrefix(ps.codec, ps.tableID, ps.indexID)
 
-	return ps, nil
+	var index catalog.Index
+	for _, desc := range tableDesc.DeletableNonPrimaryIndexes() {
+		if desc.GetID() == indexID {
+			index = desc
+			break
+		}
+	}
+	if index == nil {
+		return nil, errors.AssertionFailedf("index %d not found in table %d", indexID, tableID)
+	}
+
+	vectorColumnID := index.VectorColumnID()
+
+	return NewWithColumnID(ctx, db, quantizer, codec, tableDesc, indexID, vectorColumnID)
 }
 
 // SetConsistency sets the minimum consistency level to use when reading
@@ -151,44 +154,21 @@ func (s *Store) ReadOnly() bool {
 // RunTransaction is part of the cspann.Store interface. It runs a function in
 // the context of a transaction.
 func (s *Store) RunTransaction(ctx context.Context, fn func(txn cspann.Txn) error) (err error) {
-	return s.db.DescsTxn(ctx, func(ctx context.Context, txn descs.Txn) error {
-		var tableDesc catalog.TableDescriptor
-		if s.TestingTableDesc != nil {
-			tableDesc = s.TestingTableDesc
-		} else {
-			tableDesc, err = txn.Descriptors().ByIDWithLeased(txn.KV()).Get().Table(ctx, s.tableID)
-			if err != nil {
-				return err
-			}
+	var txn Txn
+	txn.Init(s, s.kv.NewTxn(ctx, "vecstore.Store transaction"))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err == nil {
+			err = txn.kv.Commit(ctx)
 		}
-
-		indexDesc, err := catalog.MustFindIndexByID(tableDesc, s.indexID)
 		if err != nil {
-			return err
+			err = errors.CombineErrors(err, txn.kv.Rollback(ctx))
 		}
+	}()
 
-		var fullVecFetchSpec vecstorepb.GetFullVectorsFetchSpec
-		if err := InitGetFullVectorsFetchSpec(
-			&fullVecFetchSpec,
-			&eval.Context{Codec: s.codec},
-			tableDesc,
-			indexDesc,
-			tableDesc.GetPrimaryIndex(),
-		); err != nil {
-			return err
-		}
-
-		var tx Txn
-		tx.Init(&eval.Context{}, s, txn.KV(), &fullVecFetchSpec)
-
-		err = fn(&tx)
-		if err != nil {
-			log.Errorf(ctx, "error in RunTransaction: %v", err)
-			return err
-		}
-
-		return nil
-	})
+	return fn(&txn)
 }
 
 // MakePartitionKey is part of the cspann.Store interface. It allocates a new
@@ -307,36 +287,18 @@ func (s *Store) TryGetPartition(
 }
 
 // TryGetPartitionMetadata is part of the cspann.Store interface. It returns the
-// metadata for a batch of partitions.
+// metadata of an existing partition.
 func (s *Store) TryGetPartitionMetadata(
-	ctx context.Context, treeKey cspann.TreeKey, toGet []cspann.PartitionMetadataToGet,
-) error {
-	// Construct a batch with one Get request per partition.
+	ctx context.Context, treeKey cspann.TreeKey, partitionKey cspann.PartitionKey,
+) (cspann.PartitionMetadata, error) {
 	b := s.kv.NewBatch()
-	for i := range toGet {
-		metadataKey := vecencoding.EncodeMetadataKey(s.prefix, treeKey, toGet[i].Key)
-		b.Get(metadataKey)
+	metadataKey := vecencoding.EncodeMetadataKey(s.prefix, treeKey, partitionKey)
+	b.Get(metadataKey)
+	if err := s.kv.Run(ctx, b); err != nil {
+		return cspann.PartitionMetadata{},
+			errors.Wrapf(err, "getting partition metadata for %d", partitionKey)
 	}
-
-	// Run the batch and return results.
-	var err error
-	if err = s.kv.Run(ctx, b); err != nil {
-		return errors.Wrapf(err, "getting partition metadata for %d partitions", len(toGet))
-	}
-
-	for i := range toGet {
-		item := &toGet[i]
-		item.Metadata, err = s.getMetadataFromKVResult(item.Key, &b.Results[i])
-
-		// If partition is missing, just return Missing metadata.
-		if err != nil {
-			if !errors.Is(err, cspann.ErrPartitionNotFound) {
-				return err
-			}
-		}
-	}
-
-	return nil
+	return s.getMetadataFromKVResult(partitionKey, &b.Results[0])
 }
 
 // TryUpdatePartitionMetadata is part of the cspann.Store interface. It updates
@@ -395,10 +357,6 @@ func (s *Store) TryAddToPartition(
 		}
 		if !metadata.Equal(&expected) {
 			return cspann.NewConditionFailedError(metadata)
-		}
-		if !metadata.StateDetails.State.AllowAdd() {
-			return errors.AssertionFailedf(
-				"cannot add to partition in state %s that disallows adds", metadata.StateDetails.State)
 		}
 
 		// Do not add vectors that are found to already exist.
@@ -557,10 +515,6 @@ func (s *Store) TryClearPartition(
 		}
 		if !metadata.Equal(&expected) {
 			return cspann.NewConditionFailedError(metadata)
-		}
-		if metadata.StateDetails.State.AllowAdd() {
-			return errors.AssertionFailedf(
-				"cannot clear partition in state %s that allows adds", metadata.StateDetails.State)
 		}
 
 		// Clear all vectors in the partition using DelRange.

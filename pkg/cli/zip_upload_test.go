@@ -212,10 +212,6 @@ func TestUploadZipEndToEnd(t *testing.T) {
 				includeFlag = "--include=misc"
 			}
 
-			defer testutils.TestingHook(&getCurrentTime, func() time.Time {
-				return time.Date(2024, 11, 14, 0, 0, 0, 0, time.UTC)
-			})()
-
 			debugDir, cleanup := setupZipDir(t, testInput)
 			defer cleanup()
 

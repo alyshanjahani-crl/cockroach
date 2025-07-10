@@ -99,7 +99,6 @@ var clusterWideTableDumps = map[string]columnParserMap{
 	"crdb_internal.create_type_statements.txt":      {},
 	"crdb_internal.create_procedure_statements.txt": {},
 	"crdb_internal.create_function_statements.txt":  {},
-	"crdb_internal.create_trigger_statements.txt":   {},
 	"crdb_internal.logical_replication_spans.txt":   {},
 	"crdb_internal.cluster_replication_spans.txt":   {},
 	"system.protected_ts_records.txt":               {},
@@ -318,41 +317,23 @@ func processTableDump(
 
 // makeTableIterator returns the headers slice and an iterator
 func makeTableIterator(f io.Reader) ([]string, func(func(string) error) error) {
-	reader := bufio.NewReader(f)
+	scanner := bufio.NewScanner(f)
 
-	// Read first line for headers
-	headerLine, err := reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return nil, func(func(string) error) error { return err }
-	}
+	// some of the rows can be very large, bigger than the bufio.MaxTokenSize
+	// (65kb). So, we need to increase the buffer size and split by lines while
+	// scanning.
+	scanner.Buffer(nil, 5<<20) // 5 MB
+	scanner.Split(bufio.ScanLines)
 
-	// Trim the newline character if present
-	headerLine = strings.TrimSuffix(headerLine, "\n")
-	headers := strings.Split(headerLine, "\t")
-
-	return headers, func(fn func(string) error) error {
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				if err == io.EOF {
-					// Process any remaining content before EOF
-					if line != "" {
-						if err := fn(strings.TrimSuffix(line, "\n")); err != nil {
-							return err
-						}
-					}
-					break
-				}
-				return err
-			}
-
-			// Trim the newline character
-			line = strings.TrimSuffix(line, "\n")
-			if err := fn(line); err != nil {
+	scanner.Scan() // scan the first line to get the headers
+	return strings.Split(scanner.Text(), "\t"), func(fn func(string) error) error {
+		for scanner.Scan() {
+			if err := fn(scanner.Text()); err != nil {
 				return err
 			}
 		}
-		return nil
+
+		return scanner.Err()
 	}
 }
 
