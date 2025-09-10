@@ -38,8 +38,6 @@ func (op Operation) Result() *Result {
 		return &o.Result
 	case *BarrierOperation:
 		return &o.Result
-	case *FlushLockTableOperation:
-		return &o.Result
 	case *SplitOperation:
 		return &o.Result
 	case *MergeOperation:
@@ -140,8 +138,6 @@ func (op Operation) format(w *strings.Builder, fctx formatCtx) {
 		o.format(w, fctx)
 	case *BarrierOperation:
 		o.format(w, fctx)
-	case *FlushLockTableOperation:
-		o.format(w, fctx)
 	case *SplitOperation:
 		o.format(w, fctx)
 	case *MergeOperation:
@@ -173,32 +169,27 @@ func (op Operation) format(w *strings.Builder, fctx formatCtx) {
 		newFctx := fctx
 		newFctx.indent = fctx.indent + `  `
 		newFctx.receiver = txnName
-
-		txnFuncf := func(fmtStr string, args ...any) {
-			w.WriteString("\n")
-			w.WriteString(newFctx.indent)
-			w.WriteString(newFctx.receiver)
-			fmt.Fprintf(w, fmtStr, args...)
-		}
-
 		w.WriteString(fctx.receiver)
 		fmt.Fprintf(w, `.Txn(ctx, func(ctx context.Context, %s *kv.Txn) error {`, txnName)
-
-		txnFuncf(`.SetIsoLevel(isolation.%s)`, o.IsoLevel)
-		if o.UserPriority > 0 {
-			txnFuncf(`.SetUserPriority(roachpb.UserPriority(%f))`, float64(o.UserPriority))
-		}
-		txnFuncf(`.SetBufferedWritesEnabled(%v)`, o.BufferedWrites)
-
+		w.WriteString("\n")
+		w.WriteString(newFctx.indent)
+		w.WriteString(newFctx.receiver)
+		fmt.Fprintf(w, `.SetIsoLevel(isolation.%s)`, o.IsoLevel)
+		w.WriteString("\n")
+		w.WriteString(newFctx.indent)
+		w.WriteString(newFctx.receiver)
+		fmt.Fprintf(w, `.SetBufferedWritesEnabled(%v)`, o.BufferedWrites)
 		formatOps(w, newFctx, o.Ops)
 		if o.CommitInBatch != nil {
 			newFctx.receiver = `b`
 			o.CommitInBatch.format(w, newFctx)
 			newFctx.receiver = txnName
-			txnFuncf(`.CommitInBatch(ctx, b)`)
+			w.WriteString("\n")
+			w.WriteString(newFctx.indent)
+			w.WriteString(newFctx.receiver)
+			w.WriteString(`.CommitInBatch(ctx, b)`)
 			o.CommitInBatch.Result.format(w)
 		}
-
 		w.WriteString("\n")
 		w.WriteString(newFctx.indent)
 		switch o.Type {
@@ -253,11 +244,7 @@ func (op GetOperation) format(w *strings.Builder, fctx formatCtx) {
 }
 
 func (op PutOperation) format(w *strings.Builder, fctx formatCtx) {
-	verb := "Put"
-	if op.MustAcquireExclusiveLock {
-		verb = "PutMustAcquireExclusiveLock"
-	}
-	fmt.Fprintf(w, `%s.%s(%s%s, sv(%d))`, fctx.receiver, verb, fctx.maybeCtx(), fmtKey(op.Key), op.Seq)
+	fmt.Fprintf(w, `%s.Put(%s%s, sv(%d))`, fctx.receiver, fctx.maybeCtx(), fmtKey(op.Key), op.Seq)
 	op.Result.format(w)
 }
 
@@ -302,11 +289,7 @@ func (op ScanOperation) format(w *strings.Builder, fctx formatCtx) {
 }
 
 func (op DeleteOperation) format(w *strings.Builder, fctx formatCtx) {
-	verb := "Del"
-	if op.MustAcquireExclusiveLock {
-		verb = "DelMustAcquireExclusiveLock"
-	}
-	fmt.Fprintf(w, `%s.%s(%s%s /* @%s */)`, fctx.receiver, verb, fctx.maybeCtx(), fmtKey(op.Key), op.Seq)
+	fmt.Fprintf(w, `%s.Del(%s%s /* @%s */)`, fctx.receiver, fctx.maybeCtx(), fmtKey(op.Key), op.Seq)
 	op.Result.format(w)
 }
 
@@ -382,11 +365,6 @@ func (op BarrierOperation) format(w *strings.Builder, fctx formatCtx) {
 	} else {
 		fmt.Fprintf(w, `%s.Barrier(ctx, %s, %s)`, fctx.receiver, fmtKey(op.Key), fmtKey(op.EndKey))
 	}
-	op.Result.format(w)
-}
-
-func (op FlushLockTableOperation) format(w *strings.Builder, fctx formatCtx) {
-	fmt.Fprintf(w, `%s.FlushLockTable(ctx, %s, %s)`, fctx.receiver, fmtKey(op.Key), fmtKey(op.EndKey))
 	op.Result.format(w)
 }
 
