@@ -25,7 +25,6 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/util/timeutil"
 	"github.com/cockroachdb/cockroach/pkg/workload"
 	"github.com/cockroachdb/cockroach/pkg/workload/histogram"
-	"github.com/cockroachdb/cockroach/pkg/workload/workloadimpl"
 	"github.com/cockroachdb/errors"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -359,12 +358,6 @@ func (g *ycsb) Tables() []workload.Table {
 		const batchSize = 1000
 		usertable.InitialRows = workload.BatchedTuples{
 			NumBatches: (g.insertCount + batchSize - 1) / batchSize,
-			// If the key sequence is hashed, duplicates are possible. Hash
-			// collisions are inevitable at large insert counts (they're at
-			// least inevitable at ~1b rows). Marking that the keys may contain
-			// duplicates will cause the data loader to use INSERT ... ON
-			// CONFLICT DO NOTHING statements.
-			MayContainDuplicates: !g.insertHash,
 			FillBatch: func(batchIdx int, cb coldata.Batch, _ *bufalloc.ByteAllocator) {
 				rowBegin, rowEnd := batchIdx*batchSize, (batchIdx+1)*batchSize
 				if rowEnd > g.insertCount {
@@ -468,15 +461,13 @@ func (g *ycsb) Ops(
 	requestGenRng := rand.New(rand.NewPCG(RandomSeed.Seed(), 0))
 	switch strings.ToLower(g.requestDistribution) {
 	case "zipfian":
-		requestGen, err = workloadimpl.NewZipfGenerator(
-			requestGenRng, zipfIMin,
-			workloadimpl.DefaultIMax-1, workloadimpl.DefaultTheta, false /* verbose */)
+		requestGen, err = NewZipfGenerator(
+			requestGenRng, zipfIMin, defaultIMax-1, defaultTheta, false /* verbose */)
 	case "uniform":
 		requestGen, err = NewUniformGenerator(requestGenRng, 0, uint64(g.recordCount)-1)
 	case "latest":
 		requestGen, err = NewSkewedLatestGenerator(
-			requestGenRng, zipfIMin, uint64(g.recordCount)-1,
-			workloadimpl.DefaultTheta, false /* verbose */)
+			requestGenRng, zipfIMin, uint64(g.recordCount)-1, defaultTheta, false /* verbose */)
 	default:
 		return workload.QueryLoad{}, errors.Errorf("Unknown request distribution: %s", g.requestDistribution)
 	}
@@ -488,9 +479,7 @@ func (g *ycsb) Ops(
 	scanLengthGenRng := rand.New(rand.NewPCG(RandomSeed.Seed(), 1))
 	switch strings.ToLower(g.scanLengthDistribution) {
 	case "zipfian":
-		scanLengthGen, err = workloadimpl.NewZipfGenerator(
-			scanLengthGenRng, g.minScanLength, g.maxScanLength,
-			workloadimpl.DefaultTheta, false /* verbose */)
+		scanLengthGen, err = NewZipfGenerator(scanLengthGenRng, g.minScanLength, g.maxScanLength, defaultTheta, false /* verbose */)
 	case "uniform":
 		scanLengthGen, err = NewUniformGenerator(scanLengthGenRng, g.minScanLength, g.maxScanLength)
 	default:

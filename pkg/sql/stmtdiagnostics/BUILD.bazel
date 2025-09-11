@@ -2,13 +2,11 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "stmtdiagnostics",
-    srcs = [
-        "statement_diagnostics.go",
-        "txn_diagnostics.go",
-    ],
+    srcs = ["statement_diagnostics.go"],
     importpath = "github.com/cockroachdb/cockroach/pkg/sql/stmtdiagnostics",
     visibility = ["//visibility:public"],
     deps = [
+        "//pkg/clusterversion",
         "//pkg/multitenant",
         "//pkg/settings",
         "//pkg/settings/cluster",
@@ -32,14 +30,12 @@ go_test(
         "main_test.go",
         "statement_diagnostics_helpers_test.go",
         "statement_diagnostics_test.go",
-        "txn_diagnostics_test.go",
     ],
     embed = [":stmtdiagnostics"],
     tags = ["no-remote-exec"],
     deps = [
         "//pkg/base",
         "//pkg/keys",
-        "//pkg/kv",
         "//pkg/kv/kvpb",
         "//pkg/kv/kvserver",
         "//pkg/roachpb",
@@ -49,7 +45,6 @@ go_test(
         "//pkg/settings/cluster",
         "//pkg/sql",
         "//pkg/sql/catalog/systemschema",
-        "//pkg/sql/isql",
         "//pkg/sql/sqlerrors",
         "//pkg/testutils",
         "//pkg/testutils/serverutils",
@@ -59,7 +54,6 @@ go_test(
         "//pkg/util/leaktest",
         "//pkg/util/log",
         "//pkg/util/syncutil",
-        "//pkg/util/timeutil",
         "//pkg/util/uuid",
         "@com_github_cockroachdb_errors//:errors",
         "@com_github_stretchr_testify//require",

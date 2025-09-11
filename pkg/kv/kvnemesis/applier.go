@@ -143,8 +143,6 @@ func applyOp(ctx context.Context, env *Env, db *kv.DB, op *Operation) {
 			_, err = db.Barrier(ctx, o.Key, o.EndKey)
 		}
 		o.Result = resultInit(ctx, err)
-	case *FlushLockTableOperation:
-		o.Result = resultInit(ctx, db.FlushLockTable(ctx, o.Key, o.EndKey))
 	case *ClosureTxnOperation:
 		// Use a backoff loop to avoid thrashing on txn aborts. Don't wait between
 		// epochs of the same transaction to avoid waiting while holding locks.
@@ -156,11 +154,6 @@ func applyOp(ctx context.Context, env *Env, db *kv.DB, op *Operation) {
 		txnErr := db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
 			if err := txn.SetIsoLevel(o.IsoLevel); err != nil {
 				panic(err)
-			}
-			if o.UserPriority > 0 {
-				if err := txn.SetUserPriority(o.UserPriority); err != nil {
-					panic(err)
-				}
 			}
 			txn.SetBufferedWritesEnabled(o.BufferedWrites)
 			if savedTxn != nil && txn.TestingCloneTxn().Epoch == 0 {
@@ -330,11 +323,7 @@ func applyClientOp(
 		}
 	case *PutOperation:
 		_, ts, err := dbRunWithResultAndTimestamp(ctx, db, func(b *kv.Batch) {
-			if o.MustAcquireExclusiveLock {
-				b.PutMustAcquireExclusiveLock(o.Key, o.Value())
-			} else {
-				b.Put(o.Key, o.Value())
-			}
+			b.Put(o.Key, o.Value())
 			setLastReqSeq(b, o.Seq)
 		})
 		o.Result = resultInit(ctx, err)
@@ -385,11 +374,7 @@ func applyClientOp(
 		}
 	case *DeleteOperation:
 		res, ts, err := dbRunWithResultAndTimestamp(ctx, db, func(b *kv.Batch) {
-			if o.MustAcquireExclusiveLock {
-				b.DelMustAcquireExclusiveLock(o.Key)
-			} else {
-				b.Del(o.Key)
-			}
+			b.Del(o.Key)
 			setLastReqSeq(b, o.Seq)
 		})
 		o.Result = resultInit(ctx, err)
@@ -462,16 +447,6 @@ func applyClientOp(
 					EndKey: o.EndKey,
 				},
 				WithLeaseAppliedIndex: o.WithLeaseAppliedIndex,
-			})
-		})
-		o.Result = resultInit(ctx, err)
-	case *FlushLockTableOperation:
-		_, _, err := dbRunWithResultAndTimestamp(ctx, db, func(b *kv.Batch) {
-			b.AddRawRequest(&kvpb.FlushLockTableRequest{
-				RequestHeader: kvpb.RequestHeader{
-					Key:    o.Key,
-					EndKey: o.EndKey,
-				},
 			})
 		})
 		o.Result = resultInit(ctx, err)
@@ -555,11 +530,7 @@ func applyBatchOp(
 				b.Get(subO.Key)
 			}
 		case *PutOperation:
-			if subO.MustAcquireExclusiveLock {
-				b.PutMustAcquireExclusiveLock(subO.Key, subO.Value())
-			} else {
-				b.Put(subO.Key, subO.Value())
-			}
+			b.Put(subO.Key, subO.Value())
 			setLastReqSeq(b, subO.Seq)
 		case *ScanOperation:
 			if subO.SkipLocked {
@@ -587,11 +558,7 @@ func applyBatchOp(
 				}
 			}
 		case *DeleteOperation:
-			if subO.MustAcquireExclusiveLock {
-				b.DelMustAcquireExclusiveLock(subO.Key)
-			} else {
-				b.Del(subO.Key)
-			}
+			b.Del(subO.Key)
 			setLastReqSeq(b, subO.Seq)
 		case *DeleteRangeOperation:
 			b.DelRange(subO.Key, subO.EndKey, true /* returnKeys */)
@@ -603,8 +570,6 @@ func applyBatchOp(
 			panic(errors.AssertionFailedf(`AddSSTable cannot be used in batches`))
 		case *BarrierOperation:
 			panic(errors.AssertionFailedf(`Barrier cannot be used in batches`))
-		case *FlushLockTableOperation:
-			panic(errors.AssertionFailedf(`FlushLockOperation cannot be used in batches`))
 		default:
 			panic(errors.AssertionFailedf(`unknown batch operation type: %T %v`, subO, subO))
 		}
@@ -688,11 +653,11 @@ func getRangeDesc(ctx context.Context, key roachpb.Key, dbs ...*kv.DB) roachpb.R
 		sender := dbs[dbIdx].NonTransactionalSender()
 		descs, _, err := kv.RangeLookup(ctx, sender, key, kvpb.CONSISTENT, 0, false)
 		if err != nil {
-			log.Dev.Infof(ctx, "looking up descriptor for %s: %+v", key, err)
+			log.Infof(ctx, "looking up descriptor for %s: %+v", key, err)
 			continue
 		}
 		if len(descs) != 1 {
-			log.Dev.Infof(ctx, "unexpected number of descriptors for %s: %d", key, len(descs))
+			log.Infof(ctx, "unexpected number of descriptors for %s: %d", key, len(descs))
 			continue
 		}
 		return descs[0]
