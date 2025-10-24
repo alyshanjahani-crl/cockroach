@@ -548,11 +548,13 @@ func BenchmarkTracing(b *testing.B) {
 						netTrace bool
 					}
 					for _, test := range []testSpec{
-						{alwaysTrace: false},
+						// {alwaysTrace: false},
 						{sqlTraceRatio: 0.01},
+						{sqlTraceRatio: 0.10},
+						{sqlTraceRatio: 0.50},
 						{sqlTraceRatio: 1.0},
-						{alwaysTrace: true},
-						{netTrace: true},
+						// {alwaysTrace: true},
+						// {netTrace: true},
 					} {
 						if test.alwaysTrace && test.sqlTraceRatio != 0 {
 							panic("invalid test")
