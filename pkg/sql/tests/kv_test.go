@@ -35,7 +35,7 @@ type kvInterface interface {
 	Delete(rows, run int) error
 	Scan(rows, run int) error
 
-	prep(rows int) error
+	prep(rows int, sampleRate float64) error
 	done()
 }
 
@@ -176,7 +176,7 @@ func (kv *kvNative) prepWithAdditionalLength(rows int, addKeyLen int) error {
 	return err
 }
 
-func (kv *kvNative) prep(rows int) error {
+func (kv *kvNative) prep(rows int, _ float64) error {
 	return kv.prepWithAdditionalLength(rows, 0)
 }
 
@@ -286,7 +286,11 @@ func (kv *kvSQL) Scan(count, run int) error {
 	return nil
 }
 
-func (kv *kvSQL) prep(rows int) error {
+func (kv *kvSQL) prep(rows int, sampleRate float64) error {
+	if _, err := kv.db.Exec(fmt.Sprintf(`SET CLUSTER SETTING sql.txn_stats.sample_rate=%.2f;`, sampleRate)); err != nil {
+		return err
+	}
+
 	if _, err := kv.db.Exec(`DROP TABLE IF EXISTS bench.kv`); err != nil {
 		return err
 	}
@@ -356,36 +360,39 @@ func BenchmarkKV(b *testing.B) {
 				kvTyp := runtime.FuncForPC(reflect.ValueOf(kvFn).Pointer()).Name()
 				kvTyp = strings.TrimPrefix(kvTyp, "github.com/cockroachdb/cockroach/pkg/sql/tests_test.newKV")
 				b.Run(kvTyp, func(b *testing.B) {
-					for _, rows := range []int{1, 10, 100, 1000, 10000} {
-						b.Run(fmt.Sprintf("rows=%d", rows), func(b *testing.B) {
-							kv := kvFn(b)
-							defer kv.done()
+					for _, rows := range []int{1} {
+						for _, sampleRate := range []float64{0.01, 0.10, 0.50, 1.0} {
+							b.Run(fmt.Sprintf("rows=%d/sampleRate=%.2f", rows, sampleRate), func(b *testing.B) {
+								kv := kvFn(b)
+								defer kv.done()
 
-							var prepRows int
-							switch i {
-							case 0: // Insert
-								prepRows = 0
-							case 1: // Update
-								prepRows = rows
-							case 2: // Delete
-								prepRows = rows * b.N
-							case 3: // Scan
-								prepRows = rows
-							default:
-								b.Fatal("unexpected op")
-							}
+								var prepRows int
+								switch i {
+								case 0: // Insert
+									prepRows = 0
+								case 1: // Update
+									prepRows = rows
+								case 2: // Delete
+									prepRows = rows * b.N
+								case 3: // Scan
+									prepRows = rows
+								default:
+									b.Fatal("unexpected op")
+								}
 
-							if err := kv.prep(prepRows); err != nil {
-								b.Fatal(err)
-							}
-							b.ResetTimer()
-							for i := 0; i < b.N; i++ {
-								if err := opFn(kv, rows, i); err != nil {
+								if err := kv.prep(prepRows, sampleRate); err != nil {
 									b.Fatal(err)
 								}
-							}
-							b.StopTimer()
-						})
+								b.ResetTimer()
+								for i := 0; i < b.N; i++ {
+									if err := opFn(kv, rows, i); err != nil {
+										b.Fatal(err)
+									}
+								}
+								b.StopTimer()
+							})
+
+						}
 					}
 				})
 			}
@@ -466,7 +473,7 @@ func BenchmarkKVAndStorageUsingSQL(b *testing.B) {
 			// more keys, resulting in more files in the engine, which makes it
 			// slower.
 			rowsToInit := b.N * rowsToUpdate
-			if err := kv.prep(rowsToInit); err != nil {
+			if err := kv.prep(rowsToInit, 0.01); err != nil {
 				b.Fatal(err)
 			}
 			b.ResetTimer()
