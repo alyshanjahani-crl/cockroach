@@ -466,6 +466,7 @@ func (dsp *DistSQLPlanner) setupFlows(
 		TraceKV:           recv.tracing.KVTracingEnabled(),
 		CollectStats:      planCtx.collectExecStats,
 		StatementSQL:      statementSQL,
+		WorkloadID:        planCtx.planner.stmt.WorkloadID,
 	}
 	if localState.IsLocal {
 		// VectorizeMode is the only field that the setup code expects to be set
