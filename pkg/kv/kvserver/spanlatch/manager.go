@@ -15,6 +15,7 @@ import (
 	"github.com/cockroachdb/cockroach/pkg/kv/kvpb"
 	"github.com/cockroachdb/cockroach/pkg/kv/kvserver/concurrency/poison"
 	"github.com/cockroachdb/cockroach/pkg/kv/kvserver/spanset"
+	"github.com/cockroachdb/cockroach/pkg/obs/ash"
 	"github.com/cockroachdb/cockroach/pkg/roachpb"
 	"github.com/cockroachdb/cockroach/pkg/settings/cluster"
 	"github.com/cockroachdb/cockroach/pkg/util/hlc"
@@ -503,6 +504,16 @@ func ignoreNothing(ts, other hlc.Timestamp) bool { return false }
 // wait waits for all interfering latches in the provided snapshot to complete
 // before returning.
 func (m *Manager) wait(ctx context.Context, lg *Guard, snap snapshot) error {
+	tenantID, _ := roachpb.ClientTenantFromContext(ctx)
+	var workloadID uint64
+	if lg.ba != nil {
+		workloadID = lg.ba.WorkloadID
+	}
+	cleanup := ash.SetWorkState(
+		tenantID, workloadID,
+		ash.WorkLock, "LatchWait")
+	defer cleanup()
+
 	var timer timeutil.Timer
 	defer timer.Stop()
 
