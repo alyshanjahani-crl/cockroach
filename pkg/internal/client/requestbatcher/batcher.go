@@ -132,6 +132,12 @@ type Config struct {
 	// enforced. It is inadvisable to disable both MaxIdle and MaxWait.
 	MaxIdle time.Duration
 
+	// DefaultWorkloadID, if non-zero, is set as the WorkloadID on every
+	// BatchRequest constructed by this batcher. This allows internal
+	// subsystems (e.g. intent resolution, GC) to attribute their KV
+	// traffic in ASH samples.
+	DefaultWorkloadID uint64
+
 	// MaxTimeout limits the amount of time that a BatchRequest can run for
 	// before timing out. When the work for a batch is paginated into multiple
 	// BatchRequests, due to MaxKeysPerBatchReq or TargetBytesPerBatchReq, this
@@ -680,6 +686,9 @@ func (b *batch) batchRequest(cfg *Config) *kvpb.BatchRequest {
 		req.TargetBytes = cfg.TargetBytesPerBatchReq
 	}
 	req.AdmissionHeader = b.admissionHeader()
+	if cfg.DefaultWorkloadID != 0 {
+		req.Header.WorkloadID = cfg.DefaultWorkloadID
+	}
 	return req
 }
 
