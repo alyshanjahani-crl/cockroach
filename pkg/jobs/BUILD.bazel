@@ -95,6 +95,7 @@ go_test(
     name = "jobs_test",
     size = "large",
     srcs = [
+        "ash_integration_test.go",
         "delegate_control_test.go",
         "execution_detail_utils_test.go",
         "executor_impl_test.go",
@@ -129,6 +130,7 @@ go_test(
         "//pkg/keys",
         "//pkg/keyvisualizer",
         "//pkg/kv",
+        "//pkg/kv/kvpb",
         "//pkg/kv/kvserver",
         "//pkg/kv/kvserver/protectedts/ptpb",
         "//pkg/roachpb",

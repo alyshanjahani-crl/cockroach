@@ -473,6 +473,12 @@ func (r *Registry) runJob(
 	// Make sure that we remove the job from the running set when this returns.
 	defer r.unregister(job.ID())
 
+	// Inject the job's ID into the context so that any kv.DB or
+	// InternalDB transaction created within the job automatically
+	// carries the workload ID in KV BatchRequest headers for ASH
+	// attribution.
+	ctx = kv.ContextWithWorkloadID(ctx, uint64(job.ID()))
+
 	// Bookkeeping.
 	execCtx, cleanup := r.execCtx(ctx, "resume-"+taskName, username)
 	defer cleanup()
