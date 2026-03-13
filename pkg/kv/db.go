@@ -282,6 +282,25 @@ type DB struct {
 	SQLCPUProvider admission.SQLCPUProvider
 }
 
+// workloadIDCtxKey is the context key for workload ID propagation.
+type workloadIDCtxKey struct{}
+
+// ContextWithWorkloadID returns a new context that carries the given
+// workload ID. Transaction creation methods (NewTxn, Txn,
+// TxnWithAdmissionControl, TxnWithSteppingEnabled) automatically
+// extract this value and call SetWorkloadInfo on the new transaction,
+// enabling ASH workload attribution.
+func ContextWithWorkloadID(ctx context.Context, id uint64) context.Context {
+	return context.WithValue(ctx, workloadIDCtxKey{}, id)
+}
+
+// WorkloadIDFromContext extracts the workload ID previously set by
+// ContextWithWorkloadID. Returns 0 if no workload ID is present.
+func WorkloadIDFromContext(ctx context.Context) uint64 {
+	v, _ := ctx.Value(workloadIDCtxKey{}).(uint64)
+	return v
+}
+
 // NonTransactionalSender returns a Sender that can be used for sending
 // non-transactional requests. The Sender is capable of transparently wrapping
 // non-transactional requests that span ranges in transactions.
@@ -1019,6 +1038,9 @@ func (db *DB) NewTxn(ctx context.Context, debugName string) *Txn {
 	nodeID, _ := db.ctx.NodeID.OptionalNodeID() // zero if not available
 	txn := NewTxn(ctx, db, nodeID)
 	txn.SetDebugName(debugName)
+	if wid := WorkloadIDFromContext(ctx); wid != 0 {
+		txn.SetWorkloadInfo(wid, 0 /* appNameID */)
+	}
 	return txn
 }
 
@@ -1076,6 +1098,9 @@ func (db *DB) TxnWithAdmissionControl(
 	txn := NewTxnWithAdmissionControl(ctx, db, nodeID, source, priority)
 	txn.SetDebugName("unnamed")
 	txn.ConfigureStepping(ctx, steppingMode)
+	if wid := WorkloadIDFromContext(ctx); wid != 0 {
+		txn.SetWorkloadInfo(wid, 0 /* appNameID */)
+	}
 	return runTxn(ctx, txn, retryable)
 }
 
@@ -1095,6 +1120,9 @@ func (db *DB) TxnWithSteppingEnabled(
 	nodeID, _ := db.ctx.NodeID.OptionalNodeID() // zero if not available
 	txn := NewTxnWithSteppingEnabled(ctx, db, nodeID, qualityOfService)
 	txn.SetDebugName("unnamed")
+	if wid := WorkloadIDFromContext(ctx); wid != 0 {
+		txn.SetWorkloadInfo(wid, 0 /* appNameID */)
+	}
 	return runTxn(ctx, txn, retryable)
 }
 
